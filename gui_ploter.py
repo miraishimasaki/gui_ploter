@@ -45,7 +45,7 @@ class ploter:
         self.photo_frame = ttk.Frame(self.root,height=800,width=750) 
         #原来下面按钮之间有填充就是因为frame的样式设计成了light
         self.photo_frame.place(x=30,y=200)
-        self.load_photo('test.jpg')
+        self.load_photo('./internal/test.jpg')
         
     def create_entry(self):
         dir_entry_label = ttk.Label(self.root,text='輸入表達式',bootstyle='inverse-danger',state='disabled')
