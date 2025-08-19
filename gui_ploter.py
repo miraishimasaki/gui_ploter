@@ -4,6 +4,8 @@ from tkinter import messagebox
 from PIL.Image import open
 from PIL.ImageTk import PhotoImage
 from matplotlib import use
+from scipy.interpolate import interp1d
+from scipy.optimize import curve_fit
 
 # from time import time,sleep
 from re import sub,findall
@@ -34,6 +36,11 @@ class ploter:
         self.expr_entry = self.create_entry()
         self.create_button()
         self.combbox = self.create_combobox()
+
+        self.interp_params = {'method': 'Cubic Spline','points':300}  # 插值的参数
+        self.fitting_params = {'method': '2nd-order poly','points':300}  # 拟合的参数
+
+        self.create_menu()
         self.root.mainloop()    
 
     def creat_windows(self):
@@ -90,14 +97,30 @@ class ploter:
 
         return dir_entry
     
-    def create_combobox(self):
-        
-        cb_label = ttk.Label(self.root,text='模式',bootstyle='inverse-light')
-        cb_label.place(x=1000,y= 670)
-        cb = ttk.Combobox(self.root,bootstyle = 'light',width=16,values=['輸入表達式計算','給定縱軸數據'],state='readonly')
-        cb.bind('<<ComboboxSelected>>', self.update)
-        cb.set('給定縱軸數據')   
-        cb.place(x=1000,y=700)
+
+    def create_menu(self):
+        Menubar = ttk.Menu(self.root)
+        tipsmenu = ttk.Menu(Menubar)
+        helpmenu = ttk.Menu(Menubar)
+        Menubar.add_cascade(label='設定',menu=tipsmenu)
+        tipsmenu.add_command(label='插值設置', command=self.interpolation_tl)
+        tipsmenu.add_command(label='數據擬合設置', command=self.fitting_tl)
+        self.root.config(menu = Menubar)
+
+    def create_combobox(self,obj = None):
+        if not obj:
+            cb_label = ttk.Label(self.root,text='模式',bootstyle='inverse-light')
+            cb_label.place(x=1000,y= 670)
+            cb = ttk.Combobox(self.root,bootstyle = 'light',width=16,values=['輸入表達式計算','給定縱軸數據','數據擬合','插值'],state='readonly')
+            cb.bind('<<ComboboxSelected>>', self.update)
+            cb.set('給定縱軸數據')   
+            cb.place(x=1000,y=700)
+        else:
+            cb_label = ttk.Label(obj,text='模式',bootstyle='inverse-light')
+            cb_label.place(x=500,y= 335)
+            cb = ttk.Combobox(obj,bootstyle = 'light',width=16,state='readonly')
+
+            cb.place(x=500,y=365)
         return cb
     
     def update(self,event):
@@ -142,7 +165,7 @@ class ploter:
         result = sub(self.var_name.get(), 'x', self.expresion.get())
         return result
 
-    def operate(self):
+    def calculate(self):
         # 处理表达式
         input_data = self.load_x_data()
         if input_data.size != 0:
@@ -165,6 +188,164 @@ class ploter:
         else:
             return None, None
 
+
+    def update_fitting(self,event,method, points):
+        self.fitting_params['method'] = method
+        self.fitting_params['points'] = points
+
+
+    def fitting_tl(self):
+        ftl =  ttk.Toplevel(self.root)
+        ftl.title('數據擬合設置')
+        ftl.geometry('400x300')
+        cb_label = ttk.Label(ftl,text='模式',bootstyle='inverse-light')
+        cb_label.place(x=50,y= 135)
+        cb = ttk.Combobox(ftl,bootstyle = 'light',width=16,state='readonly',values=['2nd-order poly','3rd-order poly','Higher-order poly（5）','Exponential fitting','Logarithmic fitting','Linear fitting'])
+        #cb.bind('<<ComboboxSelected>>', lambda event: self.update_fitting(event, cb.get(), 300))
+        cb.place(x=50,y=165)
+        scale = ttk.Scale(
+            ftl, from_=10, to=150, length=250,orient='horizontal', bootstyle='light',command=lambda event : print(scale.get()))
+        #绑定用lambda event：来获取scale的值，event是tkinter自动传入的事件对象
+        scale.set(50)
+        sc_label = ttk.Label(ftl,text='插值点(每单位10-150)',bootstyle='inverse-light')
+        sc_label.place(x=50,y= 35)
+        scale.place(x=50, y=75)
+        cb.set('2nd-order poly')  # 设置默认值为二阶多项式拟合
+
+        ftl.protocol("WM_DELETE_WINDOW", lambda: [self.update_fitting(None, cb.get(), int(scale.get())), 
+                                                  print(f'method : {self.fitting_params["method"]}, points : {self.fitting_params["points"]}'),
+                                                  ftl.destroy()
+                                                  ])   #关闭窗口时更新参数
+
+    def fitting(self, event=None):
+        if self.combbox.get() == '數據擬合':
+            x_data = self.load_x_data()
+            y_data =  self.load_y_data()
+
+            x_yield = np.linspace(x_data.min(), x_data.max(), self.fitting_params['points'])
+
+            if self.fitting_params['method'] == '2nd-order poly':
+                coeff = np.polyfit(x_data, y_data, 2)
+                print(f'2nd-order poly fitting params: {coeff}')
+                y_yield = np.polyval(coeff, x_yield)
+
+            elif self.fitting_params['method'] == '3rd-order poly':
+                coeff = np.polyfit(x_data, y_data, 3)
+                print(f'3rd-order poly fitting params: {coeff}')
+                y_yield = np.polyval(coeff, x_yield)
+
+            elif self.fitting_params['method'] == 'Higher-order poly（5）':
+                coeff = np.polyfit(x_data, y_data, 5)
+                print(f'Higher-order poly fitting params: {coeff}')
+                y_yield = np.polyval(coeff, x_yield)     
+
+            elif self.fitting_params['method'] == 'Linear fitting':
+                coeff = np.polyfit(x_data, y_data, 1)
+                print(f'Linear fitting params: {coeff}')
+                y_yield = np.polyval(coeff, x_yield)
+
+            #指数和对数拟合，稍微复杂
+            elif self.fitting_params['method'] == 'Exponential fitting':
+                #4,6.4,8,8.8,9.22,9.5,9.7,9.86,10,10.2,10.32,10.42,10.50,10.55,10.58,10.60
+                # mask1 = y_data > 0  # 确保y值为正
+                # mask2 = x_data!=0
+                # mask = mask1 & mask2
+                
+                # def get_params_exp(x, y):
+                #     if mask.sum()<2:
+                #         a,b = 1, 0
+                #         return a, b
+                #     else:
+                #         a,b = np.polyfit(1/x[mask], np.log(y[mask]), 1)
+                #         return a,b
+
+                # a, b = get_params_exp(x_data, y_data)
+                # print(f'Exponential fitting params: a={a}, b={b}')
+                # y_yield = np.exp(a/x_yield+b)  # 注意这里的x_yield是横轴数据
+                
+                mask1 = y_data > 0  # 确保y值为正
+                mask = mask1 
+                def get_params_exp(x, y):
+                    if mask.sum()<2:
+                        a,b = 1, 0
+                        return a, b
+                    else:
+                        b,log_a = np.polyfit(x[mask], np.log(y[mask]), 1)
+                        return np.exp(log_a), b
+                    
+                a, b = get_params_exp(x_data, y_data)
+                print(f'Exponential fitting params: a={a}, b={b}')
+                y_yield = a*np.exp(b*x_yield)  # 注意这里的x_yield是横轴数据
+
+            elif self.fitting_params['method'] == 'Logarithmic fitting':
+                mask = x_data > 0  # 确保x值为正
+                def get_params_log(x, y):
+                    if mask.sum()<2:
+                        a,b = 1, np.mean(y_data)
+                        return a, b
+                    else:
+                        a,b = np.polyfit(np.log(x[mask]), y[mask], 1)
+                        return a, b
+                    
+                a, b = get_params_log(x_data, y_data)
+                print(f'Logarithmic fitting params: a={a}, b={b}')
+                y_yield = a * np.log(x_yield) + b
+
+            return x_yield,y_yield
+
+
+    def update_interpolation(self,event,method, points):
+        self.interp_params['method'] = method
+        self.interp_params['points'] = points
+
+    def interpolation_tl(self):
+        itl =  ttk.Toplevel(self.root)
+        itl.title('數據插值設置')
+        itl.geometry('400x300')
+        cb_label = ttk.Label(itl,text='模式',bootstyle='inverse-light')
+        scale = ttk.Scale(
+            itl, from_=10, to=150, length=250,orient='horizontal', bootstyle='light',command=lambda event : print(scale.get()))
+        #绑定用lambda event：来获取scale的值，event是tkinter自动传入的事件对象
+        scale.set(50)
+        sc_label = ttk.Label(itl,text='插值点(每单位10-150)',bootstyle='inverse-light')
+        sc_label.place(x=50,y= 35)
+        scale.place(x=50, y=75)
+        cb_label.place(x=50,y= 135)
+        cb = ttk.Combobox(itl,bootstyle = 'light',width=16,state='readonly',values=['Cubic Spline','Lagrange','Linear','Nearest Neighbor'])
+        #cb.bind('<<ComboboxSelected>>', lambda event: self.update_interpolation(event, cb.get(), 300))
+        cb.place(x=50,y=165)
+
+        cb.set('Cubic Spline')  # 设置默认值为三次样条曲线插值
+
+        itl.protocol("WM_DELETE_WINDOW", lambda: [self.update_interpolation(None, cb.get(), int(scale.get())), 
+                                                  print(f'method : {self.interp_params["method"]}, points : {self.interp_params["points"]}'),
+                                                  itl.destroy()])   
+        #关闭窗口时更新参数，需要绑定destroy事件，否则无法正确关闭窗口
+
+
+    def interpolation(self):
+        if self.combbox.get() == '插值':
+            x_data = self.load_x_data()
+            y_data =  self.load_y_data()
+
+            x_yield = np.linspace(x_data.min(),x_data.max(),self.interp_params['points'])
+            
+            if self.interp_params['method'] == 'Cubic Spline':
+                f = interp1d(x_data, y_data, kind='cubic')
+                
+            elif self.interp_params['method'] == 'Lagrange':
+                f = interp1d(x_data, y_data, kind='quadratic')
+                
+            elif self.interp_params['method'] == 'Linear':
+                f = interp1d(x_data, y_data, kind='linear')
+                
+            elif self.interp_params['method'] == 'Nearest Neighbor':
+                f = interp1d(x_data, y_data, kind='nearest')
+                
+
+            y_yield = f(x_yield)
+            return x_yield,y_yield
+        
     def load_photo(self,img): 
         pil_img = open(img)
         pil_img = pil_img.resize((750,750))
@@ -183,7 +364,7 @@ class ploter:
 
     def plot(self):
         if self.combbox.get() == '輸入表達式計算':
-            x,y = self.operate()
+            x,y = self.calculate()
             if isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
                 plt.plot(x,y)
                 if self.input_unit.get() != '' and self.output_unit.get() != '':
@@ -217,6 +398,40 @@ class ploter:
                     plt.grid(True)
                     plt.show()
 
+        elif self.combbox.get() == '插值':
+            x,y = self.interpolation()
+            plt.plot(self.load_x_data(), self.load_y_data(), 'o', label='原始數據')
+            if isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
+                plt.plot(x,y, label='插值結果')
+                if self.input_unit.get() != '' and self.output_unit.get() != '':
+                    plt.xlabel(f'{self.var_name.get()}/{self.input_unit.get()}')
+                    plt.ylabel(f'{self.output.get()}/{self.output_unit.get()}')
+                else:
+                    plt.xlabel(f'{self.var_name.get()}')
+                    plt.ylabel(f'{self.output.get()}')
+                if self.title.get() != '':
+                    plt.title(self.title.get())
+                plt.grid(True)
+                plt.legend()
+                plt.show()
+
+        elif self.combbox.get() == '數據擬合':
+            x,y = self.fitting()
+            plt.plot(self.load_x_data(), self.load_y_data(), 'o', label='原始數據')
+            if isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
+                plt.plot(x,y, label='擬合結果')
+                if self.input_unit.get() != '' and self.output_unit.get() != '':
+                    plt.xlabel(f'{self.var_name.get()}/{self.input_unit.get()}')
+                    plt.ylabel(f'{self.output.get()}/{self.output_unit.get()}')
+                else:
+                    plt.xlabel(f'{self.var_name.get()}')
+                    plt.ylabel(f'{self.output.get()}')
+                if self.title.get() != '':
+                    plt.title(self.title.get())
+                plt.grid(True)
+                plt.legend()
+                plt.show()
+
     def save_result(self):
         pass
 
@@ -225,3 +440,4 @@ use('TkAgg')  # 使用TkAgg后端
 plt.rcParams['font.sans-serif'] = ['KaiTi']  # 使用黑体
 plt.rcParams['axes.unicode_minus'] = False  # 正确显示负号
 ploter = ploter()
+
